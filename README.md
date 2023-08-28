@@ -67,3 +67,71 @@ to view notifications, mark them as seen and dismiss them.
 ## CLI
 
 *This still needs to be written*
+
+## Example usage with Hyprland and Waybar
+
+### Hyprland
+
+Add the following to your `~/.config/hypr/hyprland.conf`:
+
+```
+exec-once=rofication-daemon.py
+```
+
+### Waybar
+
+Add custom module to one of your module locations like follows:
+
+```
+    "modules-right": [ "temperature", "network", "cpu", "pulseaudio",
+                       "tray", "custom/rofication", "clock" ],
+```
+
+Then configure this custom module like follows:
+
+```
+    "custom/rofication": {
+      "return-type": "json",
+      "exec": "$HOME/bin/rofication-waybar.py",
+      "restart-interval": 10,
+      "exec-if": "pgrep rofication-waybar.py",
+      "format": " {}",
+      "on-click": "rofication-gui.py"
+    },
+```
+
+You may want to adjust the path based on where you install things.
+Also change the `format` string to suit your theme/fonts. And finally
+you should make it pretty via the waybar css file, e.g.:
+
+```
+#custom-rofication {
+    background-color: #8d8d8d;
+    color: #555;
+    padding: 0 10px;
+    border-radius: 4px;
+    box-shadow: rgba(0, 0, 0, 0.116) 2px 2px 5px 2px;
+    margin-top: 10px;
+    margin-bottom: 10px;
+    margin-right: 10px;
+}
+#custom-rofication.normal {
+    background-color: #a6e3a1;
+    color: #333;
+}
+#custom-rofication.critical {
+    background-color: #f38ba8 ;
+    color:#bf5673;
+    animation-name: blink;
+    animation-duration: 0.5s;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+    animation-direction: alternate;
+}
+@keyframes blink {
+    to {
+        background-color: #f9e2af;
+        color:#96804e;
+    }
+}
+```

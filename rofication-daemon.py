@@ -3,14 +3,12 @@ import jsonpickle
 import dbus
 import dbus.service
 import dbus.mainloop.glib
-from gi.repository import GObject, GLib
+from gi.repository import GLib
 import os
-import subprocess
-import sys
 import threading
 import time
 import socket
-import json
+import pygame
 
 from msg import Msg,Urgency
 
@@ -36,13 +34,15 @@ class Rofication(threading.Thread):
         self.notification_queue_lock = threading.Lock()
         self.notification_queue = []
         self.last_id=0
+        if not os.path.exists(f'{os.environ["HOME"]}/.cache/rofication'):
+            os.mkdir(f'{os.environ["HOME"]}/.cache/rofication')
         super().__init__()
 
     def load(self):
         print("Loading rofication")
         try:
-            with open('not.json', 'r') as f:
-                     self.notification_queue = jsonpickle.decode(f.read())
+            with open(f'{os.environ["HOME"]}/.cache/rofication/not.json', 'r') as f:
+                self.notification_queue = jsonpickle.decode(f.read())
         except:
             pass
 
@@ -55,7 +55,7 @@ class Rofication(threading.Thread):
     def save(self):
         print("Saving rofication")
         try:
-            with open('not.json','w') as f:
+            with open(f'{os.environ["HOME"]}/.cache/rofication/not.json','w') as f:
                 f.write(jsonpickle.encode(self.notification_queue))
         except:
             print("Failed to store queue.")
@@ -141,9 +141,13 @@ class Rofication(threading.Thread):
 
     def run(self):
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        server.bind(self.socket_path)
-        server.listen(1)
-        server.settimeout(1)
+        try:
+            server.bind(self.socket_path)
+            server.listen(1)
+            server.settimeout(1)
+        except Exception as e:
+            print("Failed to start rofication: {e}".format(e=e))
+            os._exit(1)
         while 1:
             try:
                 connection, client_address = server.accept()
@@ -202,12 +206,17 @@ class NotificationFetcher(dbus.service.Object):
             msg.deadline = time.time()+int(expire_timeout) / 1000.0
         if 'urgency' in hints:
             msg.urgency  = int(hints['urgency'])
+        if 'sound-file' in hints:
+            msg.sound    = str(hints['sound-file'])
+            if os.path.isfile(msg.sound):
+                my_sound = pygame.mixer.Sound(msg.sound)
+                my_sound.play()
         self._rofication.add_notification( msg )
         return notification_id
 
     @dbus.service.method("org.freedesktop.Notifications", in_signature='', out_signature='as')
     def GetCapabilities(self):
-        return ("body")
+        return ("body", "sound")
 
     @dbus.service.signal('org.freedesktop.Notifications', signature='uu')
     def NotificationClosed(self, id_in, reason_in):
@@ -236,6 +245,7 @@ if __name__ == '__main__':
     name = dbus.service.BusName("org.freedesktop.Notifications", session_bus)
     nf = NotificationFetcher(session_bus, '/org/freedesktop/Notifications')
 
+    pygame.init()
     nf._rofication = rofication;
 
     rofication.load();

@@ -46,8 +46,10 @@ def call_rofi(entries, additional_args=[]):
                              '-columns', '3',
                              '-lines', '4',
                              '-eh', '2',
+                             '-no-fixed-num-lines',
+                             '-dynamic',
                              '-width', '-70' ])
-    proc = subprocess.Popen(rofi_command+ additional_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+    proc = subprocess.Popen(rofi_command+additional_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     for e in entries:
         proc.stdin.write((e).encode('utf-8'))
         proc.stdin.write(struct.pack('B', 3))

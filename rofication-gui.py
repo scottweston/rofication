@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import sys
 import re
 import socket
 import struct
@@ -49,18 +48,21 @@ def call_rofi(entries, additional_args=[]):
                              '-no-fixed-num-lines',
                              '-dynamic',
                              '-width', '-70' ])
-    proc = subprocess.Popen(rofi_command+additional_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-    for e in entries:
-        proc.stdin.write((e).encode('utf-8'))
-        proc.stdin.write(struct.pack('B', 3))
-    proc.stdin.close()
-    answer = proc.stdout.read().decode("utf-8")
-    exit_code = proc.wait()
-    # trim whitespace
-    if answer == '':
-        return None,exit_code
+    if len(entries) > 0:
+        proc = subprocess.Popen(rofi_command+additional_args, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        for e in entries:
+            proc.stdin.write((e).encode('utf-8'))
+            proc.stdin.write(struct.pack('B', 3))
+        proc.stdin.close()
+        answer = proc.stdout.read().decode("utf-8")
+        exit_code = proc.wait()
+        # trim whitespace
+        if answer == '':
+            return None,exit_code
+        else:
+            return int(answer),exit_code
     else:
-        return int(answer),exit_code
+        return None,0
 
 
 def send_command(cmd):

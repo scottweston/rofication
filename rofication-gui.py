@@ -42,10 +42,9 @@ def call_rofi(entries, additional_args=[]):
                              '-markup-rows',
                              '-sep', '\3',
                              '-format', 'i',
-                             '-columns', '3',
-                             '-lines', '4',
-                             '-eh', '2',
-                             '-no-fixed-num-lines',
+                             '-l', f'{min(len(entries),5)}',
+                             '-eh', '3',
+                             '-sync',
                              '-dynamic',
                              '-width', '-70' ])
     if len(entries) > 0:

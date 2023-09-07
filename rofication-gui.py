@@ -26,8 +26,8 @@ def linesplit(socket):
     if buffer:
         yield buffer
 
-msg = """<span font-size='small'><i>Alt+s</i>:    Dismiss notification.    <i>Alt+Enter</i>:      Mark notification seen.\n"""
-msg += """<i>Alt+r</i>:    Reload                   <i>Alt+a</i>:          Delete application notification</span>""";
+msg = """<span font-size='small'>	<i>Alt+x</i>: Dismiss notification	<i>Alt+Enter</i>: Mark notification seen
+	<i>Alt+r</i>: Reload				<i>Alt+a</i>:     Delete application notification</span>""";
 rofi_command = [ 'rofi' , '-dmenu', '-p', 'Notifications:', '-markup', '-mesg', msg]
 
 def strip_tags(value):
@@ -35,7 +35,7 @@ def strip_tags(value):
   return re.sub(r'<[^>]*?>', '', value)
 
 def call_rofi(entries, additional_args=[]):
-    additional_args.extend([ '-kb-custom-1', 'Alt+s',
+    additional_args.extend([ '-kb-custom-1', 'Alt+x',
                              '-kb-custom-2', 'Alt+Return',
                              '-kb-custom-3', 'Alt+r',
                              '-kb-custom-4', 'Alt+a',
@@ -44,6 +44,7 @@ def call_rofi(entries, additional_args=[]):
                              '-format', 'i',
                              '-l', f'{min(len(entries),5)}',
                              '-eh', '3',
+							 '-i',
                              '-sync',
                              '-dynamic',
                              '-width', '-70' ])

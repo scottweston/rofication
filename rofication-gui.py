@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 import re
+import time
 import socket
 import struct
 import subprocess
 import jsonpickle
+from dateutil.relativedelta import relativedelta
 from gi.repository import GLib
 from enum import Enum
 from msg import Msg,Urgency
@@ -27,7 +29,7 @@ def linesplit(socket):
         yield buffer
 
 msg = """<span font-size='small'>	<i>Alt+x</i>: Dismiss notification	<i>Alt+Enter</i>: Mark notification seen
-	<i>Alt+r</i>: Reload				<i>Alt+a</i>:     Delete application notification</span>""";
+	<i>Alt+r</i>: Reload			<i>Alt+a</i>:     Delete application notification</span>""";
 rofi_command = [ 'rofi' , '-dmenu', '-p', 'Notifications:', '-markup', '-mesg', msg]
 
 def strip_tags(value):
@@ -39,6 +41,8 @@ def call_rofi(entries, additional_args=[]):
                              '-kb-custom-2', 'Alt+Return',
                              '-kb-custom-3', 'Alt+r',
                              '-kb-custom-4', 'Alt+a',
+                             '-kb-custom-5', 'Alt+X',
+                             '-kb-custom-6', 'Alt+A',
                              '-markup-rows',
                              '-sep', '\3',
                              '-format', 'i',
@@ -89,9 +93,15 @@ while cont:
     for a in linesplit(client):
         if len(a) > 0:
             msg = jsonpickle.decode(a)
+            #for key in msg.__dict__:
+            #    print("{key} = {value}".format(key=key,value=msg.__dict__[key]))
             ids.append(msg)
-            mst = ("<b>{summ}</b> <small>({app})</small>".format(
+            attrs = ['years', 'months', 'days', 'hours', 'minutes', 'seconds']
+            human_readable = lambda delta: ['%d %s' % (getattr(delta, attr), attr if getattr(delta, attr) > 1 else attr[:-1])
+                for attr in attrs if getattr(delta, attr)]
+            mst = ("<b>{summ}</b>\n<small>{age} ago by {app}</small>".format(
                    summ=GLib.markup_escape_text(strip_tags(msg.summary)),
+                   age=GLib.markup_escape_text(strip_tags(" ".join(human_readable(relativedelta(seconds=time.time()-msg.triggered))))),
                    app=GLib.markup_escape_text(strip_tags(msg.application))))
             if len(msg.body) > 0:
                 mst+= "\n<i>{}</i>".format(GLib.markup_escape_text(strip_tags(msg.body.replace("\n"," "))))
@@ -119,7 +129,7 @@ while cont:
     did,code = call_rofi(entries,args)
     print("{a},{b}".format(a=did,b=code))
     # Dismiss notification
-    if did != None and code == 10:
+    if did != None and (code == 10 or code == 14):
         send_command("del:{mid}".format(mid=ids[did].mid))
         cont=True
     # Seen notification
@@ -128,6 +138,6 @@ while cont:
         cont=True
     elif did != None and code == 12:
         cont=True
-    elif did != None and code == 13:
+    elif did != None and (code == 13 or code == 15):
         send_command("dela:{app}".format(app=ids[did].application))
         cont=True

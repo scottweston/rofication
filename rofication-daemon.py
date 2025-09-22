@@ -9,23 +9,16 @@ import threading
 import time
 import socket
 import pygame
+import re
+import signal
+import logging
+import sys
 
 from msg import Msg,Urgency
 
 event = threading.Event()
 
-
-"""
-    This is a list of applications where only the last notification is relevant.
-    Applications like media players fall in this category.
-"""
-single_notification_app=[ "VLC media player" ]
-
-"""
-    A list of applications that are allowed to expire.
-"""
-allowed_expire_app=[ ]
-
+config = {}
 
 class Rofication(threading.Thread):
 
@@ -39,7 +32,7 @@ class Rofication(threading.Thread):
         super().__init__()
 
     def load(self):
-        print("Loading rofication")
+        logging.debug("Loading rofication")
         try:
             with open(f'{os.environ["HOME"]}/.cache/rofication/not.json', 'r') as f:
                 self.notification_queue = jsonpickle.decode(f.read())
@@ -50,32 +43,33 @@ class Rofication(threading.Thread):
             noti.notid=-1
             if self.last_id < noti.mid:
                 self.last_id = int(noti.mid)
-        print("Found last id: {nid}".format(nid=nf._id))
+        logging.debug("Found last id: {nid}".format(nid=nf._id))
 
     def save(self):
-        print("Saving rofication")
+        logging.debug("Saving rofication")
         try:
             with open(f'{os.environ["HOME"]}/.cache/rofication/not.json','w') as f:
                 f.write(jsonpickle.encode(self.notification_queue))
         except:
-            print("Failed to store queue.")
+            logging.warn("Failed to store queue.")
     """
-        This function updates the queue. E.g. removes popups that are expired and allowed to expire
+    This function updates the queue. E.g. removes popups that are expired
+    and allowed to expire
     """
     def update_queue(self):
         with self.notification_queue_lock:
             now = time.time()
             n = [ n for n in self.notification_queue if n.application in allowed_expire_app and n.deadline > 0 and n.deadline < now ];
             for no in n:
-                print("{mid} expired.".format(mid=no.mid))
+                logging.debug("{mid} expired.".format(mid=no.mid))
                 self.notification_queue.remove(no)
 
     def remove_notification(self,id):
-        printf("Removing: {}".format(id))
+        logging.debug("Removing: {}".format(id))
         with self.notification_queue_lock:
             n = [ n for n in self.notification_queue_lock if n.notid == id ]
             for no in n:
-                print("Closing: {id}:{sum}".format(id=no.mid, sum=no.application))
+                logging.debug("Closing: {id}:{sum}".format(id=no.mid, sum=no.application))
 
     def add_notification(self,notif):
         with self.notification_queue_lock:
@@ -122,7 +116,7 @@ class Rofication(threading.Thread):
             application = None
             for noti in self.notification_queue:
                 if noti.mid == int(arg):
-                    application = noti.application 
+                    application = noti.application
                     break
             if application:
                 remove_q = []
@@ -146,7 +140,7 @@ class Rofication(threading.Thread):
             server.listen(1)
             server.settimeout(1)
         except Exception as e:
-            print("Failed to start rofication: {e}".format(e=e))
+            logging.error("Failed to start rofication: {e}".format(e=e))
             os._exit(1)
         while 1:
             try:
@@ -187,6 +181,7 @@ class Rofication(threading.Thread):
 class NotificationFetcher(dbus.service.Object):
     _id = 0
     _rofication = None
+    _last_sound_time = 0
 
     @dbus.service.method("org.freedesktop.Notifications",
                          in_signature='susssasa{ss}i',
@@ -203,16 +198,47 @@ class NotificationFetcher(dbus.service.Object):
         msg.body         = str(body)
         msg.app_icon     = str(app_icon)
         msg.triggered    = time.time()
+
         if int(expire_timeout) > 0:
             msg.deadline = time.time()+int(expire_timeout) / 1000.0
         if 'urgency' in hints:
             msg.urgency  = int(hints['urgency'])
-        if 'sound-file' in hints:
-            msg.sound    = str(hints['sound-file'])
-            if os.path.isfile(msg.sound):
-                my_sound = pygame.mixer.Sound(msg.sound)
-                my_sound.play()
-        self._rofication.add_notification( msg )
+
+        # check if summary has been silenced, regex matching
+        silence=False
+        if msg.application in sound_alerts or 'sound-file' in hints:
+            if silenced_regexes:
+                for regex in silenced_regexes:
+                    logging.debug("Checking: {regex} against {sum}".format(regex=regex, sum=msg.summary))
+                    if re.search(regex, msg.summary):
+                        logging.debug("Silencing: {regex}".format(regex=regex))
+                        silence = True
+                        msg.summary = "🔇 {sum}".format(sum=msg.summary)
+                        break
+                    else:
+                        logging.debug("Not silencing: {regex}".format(regex=regex))
+            if not silence:
+                if msg.application in sound_alerts:
+                    msg.sound = sound_alerts[msg.application]
+                else:
+                    msg.sound = str(hints['sound-file'])
+                if os.path.isfile(msg.sound):
+                    my_sound = pygame.mixer.Sound(msg.sound)
+
+                    # Add cooldown timer for sound notifications
+                    current_time = time.time()
+                    last_sound_time = self._last_sound_time
+                    sound_cooldown = config.get('sound_cooldown', 10)  # Default cooldown: 10 seconds
+
+                    if current_time - last_sound_time >= sound_cooldown:
+                        my_sound.play()
+                        self._last_sound_time = current_time
+                    else:
+                        logging.debug(f"Sound notification throttled (cooldown: {sound_cooldown}s)")
+        else:
+            logging.debug(f"No sound file found in hints or configured for {msg.application}.")
+
+        self._rofication.add_notification(msg)
         return notification_id
 
     @dbus.service.method("org.freedesktop.Notifications", in_signature='', out_signature='as')
@@ -240,13 +266,49 @@ if __name__ == '__main__':
     """ Create daemon """
     rofication = Rofication();
 
+    """ Setup logging """
+    logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s %(message)s')
+
+    """ read in config file"""
+    try:
+        with open(f'{os.environ["HOME"]}/.config/rofication/config.json', 'r') as f:
+            config = jsonpickle.decode(f.read())
+            if 'single_notification_app' in config:
+                single_notification_app = config['single_notification_app']
+            if 'allowed_expire_app' in config:
+                allowed_expire_app = config['allowed_expire_app']
+            if 'silenced_regexes' in config:
+                silenced_regexes = config['silenced_regexes']
+            if 'sound_alerts' in config:
+                sound_alerts = config['sound_alerts']
+    except:
+        logging.info("Failed to load config file, using defaults.")
+        single_notification_app = []
+        allowed_expire_app = []
+        silenced_regexes = []
+        sound_alerts = {}
+
+    """ Setup signal handling """
+    def signal_handler(signum, frame):
+        logging.info("Signal handler called with signal: {signum}".format(signum=signum))
+        event.set()
+        rofication.save()
+        os._exit(0)
+
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    signal.signal(signal.SIGHUP, signal_handler)
+    signal.signal(signal.SIGQUIT, signal_handler)
+
+    """ Setup pygame """
+    pygame.init()
+
     """ Setup DBUS"""
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
     session_bus = dbus.SessionBus()
     name = dbus.service.BusName("org.freedesktop.Notifications", session_bus)
     nf = NotificationFetcher(session_bus, '/org/freedesktop/Notifications')
 
-    pygame.init()
     nf._rofication = rofication;
 
     rofication.load();

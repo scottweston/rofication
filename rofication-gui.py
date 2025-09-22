@@ -37,10 +37,12 @@ def strip_tags(value):
   return re.sub(r'<[^>]*?>', '', value)
 
 def call_rofi(entries, additional_args=[]):
-    additional_args.extend([ '-kb-custom-1', 'Alt+x',
+    additional_args.extend([ '-kb-clear-line', '',
+                             '-kb-move-front', '',
+                             '-kb-custom-1', 'Alt+x,Ctrl+x,Ctrl+X',
                              '-kb-custom-2', 'Alt+Return',
                              '-kb-custom-3', 'Alt+r',
-                             '-kb-custom-4', 'Alt+a',
+                             '-kb-custom-4', 'Alt+a,Ctrl+a,Ctrl+A',
                              '-kb-custom-5', 'Alt+X',
                              '-kb-custom-6', 'Alt+A',
                              '-markup-rows',

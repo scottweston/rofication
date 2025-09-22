@@ -134,4 +134,31 @@ you should make it pretty via the waybar css file, e.g.:
         color:#96804e;
     }
 }
+
+## Configuration
+
+Create `~/.config/rofication/config.json` to customise the daemon. The new
+`ntfy` and `ntfy_mirror` keys allow mirroring specific notifications to an ntfy
+topic based on regular expressions that match the notification summary, body, or
+application name.
+
+```json
+{
+  "ntfy": {
+    "host": "https://ntfy.sh",
+    "token": "tk_example_personal_access_token"
+  },
+  "ntfy_mirror": [
+    {
+      "regex": "Remote access detected",
+      "topic": "phil_alerts",
+      "priority": "urgent",
+      "tags": ["warning", "skull"]
+    }
+  ]
+}
+```
+
+The rules are evaluated in order and only the first match triggers a mirror to
+ntfy. The `tags` field accepts either a string or an array of emoji short codes.
 ```

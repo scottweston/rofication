@@ -14,11 +14,85 @@ import signal
 import logging
 import sys
 
+try:
+    import requests
+except ImportError:  # pragma: no cover - best effort import
+    requests = None
+
 from msg import Msg,Urgency
 
 event = threading.Event()
 
 config = {}
+ntfy_config = {}
+ntfy_mirror_rules = []
+
+
+def mirror_notification_to_ntfy(msg):
+    if not ntfy_mirror_rules:
+        return
+    if requests is None:
+        logging.debug("requests library missing; cannot mirror to ntfy")
+        return
+
+    host = ntfy_config.get('host', 'https://ntfy.sh')
+    if not host:
+        logging.debug("ntfy host is not configured; skipping mirroring")
+        return
+
+    token = ntfy_config.get('token')
+    summary = msg.summary or ''
+    body = msg.body or ''
+    application = msg.application or ''
+
+    for rule in ntfy_mirror_rules:
+        pattern = rule.get('regex')
+        if not pattern:
+            continue
+        matches_summary = pattern.search(summary)
+        matches_body = pattern.search(body) if body else False
+        matches_application = pattern.search(application) if application else False
+        if matches_summary or matches_body or matches_application:
+            pattern_text = rule.get('pattern', '<unnamed>')
+            logging.debug(
+                f"ntfy mirror rule matched pattern '{pattern_text}' for application '{application}'"
+            )
+            topic = rule.get('topic')
+            if not topic:
+                logging.debug("Matched ntfy rule without topic; skipping")
+                continue
+
+            topic = topic.lstrip('/')
+            url = f"{host.rstrip('/')}/{topic}"
+
+            headers = {
+                "Title": summary,
+            }
+
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+
+            priority = rule.get('priority')
+            if priority:
+                headers["Priority"] = str(priority)
+
+            tags = rule.get('tags')
+            if tags:
+                if isinstance(tags, (list, tuple)):
+                    headers["Tags"] = ",".join(tags)
+                else:
+                    headers["Tags"] = str(tags)
+
+            message_body = body if body else summary
+
+            try:
+                response = requests.post(url, data=message_body, headers=headers, timeout=5)
+                response.raise_for_status()
+                logging.info(f"Mirrored notification to ntfy topic '{topic}'")
+            except Exception as exc:
+                logging.warning(f"Failed to mirror notification to ntfy topic '{topic}': {exc}")
+            finally:
+                return
 
 class Rofication(threading.Thread):
 
@@ -199,6 +273,13 @@ class NotificationFetcher(dbus.service.Object):
         msg.app_icon     = str(app_icon)
         msg.triggered    = time.time()
 
+        logging.debug(
+            "Incoming notification | application='%s' summary='%s' body='%s'",
+            msg.application,
+            msg.summary,
+            msg.body,
+        )
+
         if int(expire_timeout) > 0:
             msg.deadline = time.time()+int(expire_timeout) / 1000.0
         if 'urgency' in hints:
@@ -238,6 +319,8 @@ class NotificationFetcher(dbus.service.Object):
         else:
             logging.debug(f"No sound file found in hints or configured for {msg.application}.")
 
+        mirror_notification_to_ntfy(msg)
+
         self._rofication.add_notification(msg)
         return notification_id
 
@@ -270,23 +353,53 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG, format='%(asctime)s %(levelname)s %(message)s')
 
     """ read in config file"""
+    single_notification_app = []
+    allowed_expire_app = []
+    silenced_regexes = []
+    sound_alerts = {}
+    ntfy_config = {}
+    ntfy_mirror_rules = []
+
     try:
         with open(f'{os.environ["HOME"]}/.config/rofication/config.json', 'r') as f:
             config = jsonpickle.decode(f.read())
-            if 'single_notification_app' in config:
-                single_notification_app = config['single_notification_app']
-            if 'allowed_expire_app' in config:
-                allowed_expire_app = config['allowed_expire_app']
-            if 'silenced_regexes' in config:
-                silenced_regexes = config['silenced_regexes']
-            if 'sound_alerts' in config:
-                sound_alerts = config['sound_alerts']
-    except:
-        logging.info("Failed to load config file, using defaults.")
-        single_notification_app = []
-        allowed_expire_app = []
-        silenced_regexes = []
-        sound_alerts = {}
+            single_notification_app = config.get('single_notification_app', [])
+            allowed_expire_app = config.get('allowed_expire_app', [])
+            silenced_regexes = config.get('silenced_regexes', [])
+            sound_alerts = config.get('sound_alerts', {})
+
+            ntfy_config = config.get('ntfy', {}) or {}
+
+            raw_rules = config.get('ntfy_mirror', []) or []
+            compiled_rules = []
+            for rule in raw_rules:
+                pattern_text = rule.get('regex')
+                topic = rule.get('topic')
+                if not pattern_text or not topic:
+                    logging.warning("Skipping ntfy mirror rule without regex or topic: %s", rule)
+                    continue
+                try:
+                    compiled_pattern = re.compile(pattern_text)
+                except re.error as exc:
+                    logging.warning("Invalid ntfy mirror regex '%s': %s", pattern_text, exc)
+                    continue
+
+                compiled_rule = {
+                    'regex': compiled_pattern,
+                    'pattern': pattern_text,
+                    'topic': topic,
+                }
+
+                if 'priority' in rule:
+                    compiled_rule['priority'] = rule['priority']
+                if 'tags' in rule:
+                    compiled_rule['tags'] = rule['tags']
+
+                compiled_rules.append(compiled_rule)
+
+            ntfy_mirror_rules = compiled_rules
+    except Exception as exc:
+        logging.info("Failed to load config file, using defaults: %s", exc)
 
     """ Setup signal handling """
     def signal_handler(signum, frame):

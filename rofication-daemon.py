@@ -117,7 +117,7 @@ class Rofication(threading.Thread):
             noti.notid=-1
             if self.last_id < noti.mid:
                 self.last_id = int(noti.mid)
-        logging.debug("Found last id: {nid}".format(nid=nf._id))
+        logging.debug("Found last id: %s", self.last_id)
 
     def save(self):
         logging.debug("Saving rofication")
@@ -141,7 +141,7 @@ class Rofication(threading.Thread):
     def remove_notification(self,id):
         logging.debug("Removing: {}".format(id))
         with self.notification_queue_lock:
-            n = [ n for n in self.notification_queue_lock if n.notid == id ]
+            n = [ n for n in self.notification_queue if n.notid == id ]
             for no in n:
                 logging.debug("Closing: {id}:{sum}".format(id=no.mid, sum=no.application))
 

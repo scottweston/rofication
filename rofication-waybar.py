@@ -3,14 +3,22 @@ import os
 import time
 import socket
 
+from rofication_config import load_config, resolve_socket_path
+
+
+try:
+    SOCKET_PATH = resolve_socket_path(load_config())
+except Exception:
+    SOCKET_PATH = resolve_socket_path({})
+
 while True:
-    if not os.path.exists("/tmp/rofi_notification_daemon"):
+    if not os.path.exists(SOCKET_PATH):
         print(f"""{{"text": "error", "class": "critical", "tooltip": "Is rofication-daemon.py running? socket not found"}}""", flush=True)
         time.sleep(1)
         continue
     try:
         client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        client.connect("/tmp/rofi_notification_daemon")
+        client.connect(SOCKET_PATH)
         client.sendall(bytes("num",'utf-8'))
         val = client.recv(32)
         client.close()

@@ -161,4 +161,15 @@ application name.
 
 The rules are evaluated in order and only the first match triggers a mirror to
 ntfy. The `tags` field accepts either a string or an array of emoji short codes.
+
+By default the daemon listens on a Unix domain socket located at
+`$XDG_RUNTIME_DIR/rofication/daemon.sock`, falling back to
+`~/.cache/rofication/daemon.sock` when the runtime directory is not available.
+You can override the socket location by adding a `socket_path` entry to
+`config.json` if you need a different location.
+
+```json
+{
+  "socket_path": "~/.local/run/rofication.sock"
+}
 ```

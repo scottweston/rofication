@@ -5,10 +5,16 @@ import socket
 import struct
 import subprocess
 import jsonpickle
+from rofication_config import load_config, resolve_socket_path
 from dateutil.relativedelta import relativedelta
 from gi.repository import GLib
 from enum import Enum
 from msg import Msg,Urgency
+
+try:
+    SOCKET_PATH = resolve_socket_path(load_config())
+except Exception:
+    SOCKET_PATH = resolve_socket_path({})
 
 def linesplit(socket):
     buffer = socket.recv(16)
@@ -73,7 +79,7 @@ def call_rofi(entries, additional_args=[]):
 
 def send_command(cmd):
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    client.connect("/tmp/rofi_notification_daemon")
+    client.connect(SOCKET_PATH)
     print("Send: {cmd}".format(cmd=cmd))
     client.send(bytes(cmd, 'utf-8'))
     client.close()
@@ -84,7 +90,7 @@ cont=True
 while cont:
     cont=False
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    client.connect("/tmp/rofi_notification_daemon")
+    client.connect(SOCKET_PATH)
     client.send(b"list",4)
     ids=[]
     entries=[]

@@ -286,10 +286,22 @@ class Rofication(threading.Thread):
             with connection:
                 self.update_queue()
                 try:
-                    data = connection.recv(1024).decode("utf-8")
+                    raw_data = connection.recv(1024)
+                except OSError as exc:
+                    logging.warning("Failed to receive data from client: %s", exc)
+                    continue
+
+                if not raw_data:
+                    continue
+
+                try:
+                    data = raw_data.decode("utf-8")
                 except UnicodeDecodeError:
                     logging.warning("Received undecodable data from client")
                     continue
+
+                data = data.split("\x00", 1)[0]
+                data = data.strip("\r\n")
 
                 command = ""
                 argument = ""
@@ -298,6 +310,8 @@ class Rofication(threading.Thread):
                     command = parts[0]
                     if len(parts) > 1:
                         argument = parts[1].strip()
+                        if "\x00" in argument:
+                            argument = argument.split("\x00", 1)[0]
 
                 if command == "num":
                     self.communication_command_num(connection)

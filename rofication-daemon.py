@@ -189,7 +189,8 @@ class Rofication(threading.Thread):
 
     def add_notification(self, notif):
         with self.notification_queue_lock:
-            if notif.application in single_notification_app:
+            # Squelch by exact app name
+            if notif.application in single_notification_app_names:
                 n = [
                     n
                     for n in self.notification_queue
@@ -197,6 +198,23 @@ class Rofication(threading.Thread):
                 ]
                 for no in n:
                     self.notification_queue.remove(no)
+
+            # Squelch by regex: if the incoming notification matches any configured regex,
+            # remove existing notifications that also match that same regex.
+            summary = notif.summary or ""
+            body = notif.body or ""
+            application = notif.application or ""
+            for pattern in single_notification_regexes:
+                if pattern.search(summary) or pattern.search(body) or pattern.search(application):
+                    to_remove = []
+                    for existing in self.notification_queue:
+                        es = existing.summary or ""
+                        eb = existing.body or ""
+                        ea = existing.application or ""
+                        if pattern.search(es) or pattern.search(eb) or pattern.search(ea):
+                            to_remove.append(existing)
+                    for no in to_remove:
+                        self.notification_queue.remove(no)
 
             self.notification_queue.append(notif)
 
@@ -513,6 +531,16 @@ if __name__ == "__main__":
     rofication = Rofication(socket_path)
 
     single_notification_app = config.get("single_notification_app", [])
+    # Split single_notification_app into exact app names and regexes
+    single_notification_app_names = [e for e in single_notification_app if isinstance(e, str)]
+    single_notification_regexes = []
+    for e in single_notification_app:
+        if isinstance(e, dict) and "regex" in e:
+            try:
+                single_notification_regexes.append(re.compile(e["regex"]))
+            except re.error as exc:
+                logging.warning("Invalid single_notification_app regex '%s': %s", e["regex"], exc)
+
     allowed_expire_app = config.get("allowed_expire_app", [])
     silenced_regexes = config.get("silenced_regexes", [])
     sound_alerts = config.get("sound_alerts", {})

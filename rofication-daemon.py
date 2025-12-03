@@ -228,6 +228,22 @@ class Rofication(threading.Thread):
             for noti in remove_q:
                 self.notification_queue.remove(noti)
 
+    def communication_command_delete_older_than(self, connection, arg):
+        try:
+            seconds = int(arg)
+            if seconds < 0:
+                logging.warning(f"Invalid negative argument for del-older-than: {arg}")
+                return
+        except (ValueError, TypeError):
+            logging.warning(f"Invalid argument for del-older-than: {arg}")
+            return
+
+        with self.notification_queue_lock:
+            now = time.time()
+            self.notification_queue = [
+                n for n in self.notification_queue if (now - n.triggered) <= seconds
+            ]
+
     def communication_command_saw(self, connection, arg):
         with self.notification_queue_lock:
             for noti in self.notification_queue:
@@ -332,6 +348,15 @@ class Rofication(threading.Thread):
                         self.communication_command_delete_apps(connection, argument)
                     else:
                         logging.warning("Received 'dela' command without argument")
+                elif command == "del-older-than":
+                    if argument:
+                        self.communication_command_delete_older_than(
+                            connection, argument
+                        )
+                    else:
+                        logging.warning(
+                            "Received 'del-older-than' command without argument"
+                        )
                 elif command == "saw":
                     if argument:
                         self.communication_command_saw(connection, argument)

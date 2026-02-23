@@ -23,20 +23,28 @@ while True:
         val = client.recv(32)
         client.close()
         val = val.decode('utf-8')
-        l = val.split('\n',2)
+        l = val.split('\n')
         # l[0] is the number of notifications
         # l[1] is the number of critical notifications
-        if int(l[1]) > 0:
-            crit=f'  {str(l[1])}'
+        # l[2] is 1 when muted, otherwise 0 (optional)
+        count = int(l[0]) if len(l) > 0 and l[0].isdigit() else 0
+        critical = int(l[1]) if len(l) > 1 and l[1].isdigit() else 0
+        muted = len(l) > 2 and l[2].strip() == "1"
+        mute_icon = " 🔇" if muted else ""
+        if critical > 0:
+            crit=f'  {str(critical)}'
         else:
             crit=''
-        if int(l[0]) == 0 and int(l[1]) == 0:
+        if count == 0 and critical == 0:
             class_='none'
-        elif int(l[0]) > 0 and int(l[1]) == 0:
+        elif count > 0 and critical == 0:
             class_='normal'
         else:
             class_='critical'
-        print(f"""{{"text": "{l[0]}{crit}", "class": "{class_}", "tooltip": "{l[0]} notifications\\n{l[1]} critical"}}""", flush=True)
+        tooltip = f"{count} notifications\\n{critical} critical"
+        if muted:
+            tooltip += "\\nMuted"
+        print(f"""{{"text": "{count}{mute_icon}{crit}", "class": "{class_}", "tooltip": "{tooltip}"}}""", flush=True)
     except Exception as e:
         print(f"""{{"text": "error", "class": "critical", "tooltip": "Is rofication-daemon.py running? {e}"}}""", flush=True)
     time.sleep(1)

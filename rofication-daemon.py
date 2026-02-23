@@ -27,6 +27,100 @@ event = threading.Event()
 config = {}
 ntfy_config = {}
 ntfy_mirror_rules = []
+single_notification_app_names = []
+single_notification_regexes = []
+allowed_expire_app = []
+silenced_regexes = []
+sound_alerts = {}
+
+
+def _compile_single_notification_filters(entries):
+    names = [entry for entry in entries if isinstance(entry, str)]
+    regexes = []
+    for entry in entries:
+        if isinstance(entry, dict) and "regex" in entry:
+            try:
+                regexes.append(re.compile(entry["regex"]))
+            except re.error as exc:
+                logging.warning(
+                    "Invalid single_notification_app regex '%s': %s",
+                    entry["regex"],
+                    exc,
+                )
+    return names, regexes
+
+
+def _compile_ntfy_mirror_rules(raw_rules):
+    compiled_rules = []
+    for rule in raw_rules:
+        pattern_text = rule.get("regex")
+        topic = rule.get("topic")
+        if not pattern_text or not topic:
+            logging.warning(
+                "Skipping ntfy mirror rule without regex or topic: %s", rule
+            )
+            continue
+        try:
+            compiled_pattern = re.compile(pattern_text)
+        except re.error as exc:
+            logging.warning("Invalid ntfy mirror regex '%s': %s", pattern_text, exc)
+            continue
+
+        compiled_rule = {
+            "regex": compiled_pattern,
+            "pattern": pattern_text,
+            "topic": topic,
+        }
+        if "priority" in rule:
+            compiled_rule["priority"] = rule["priority"]
+        if "tags" in rule:
+            compiled_rule["tags"] = rule["tags"]
+
+        compiled_rules.append(compiled_rule)
+
+    return compiled_rules
+
+
+def reload_runtime_config(current_socket_path=None):
+    global config
+    global ntfy_config
+    global ntfy_mirror_rules
+    global single_notification_app_names
+    global single_notification_regexes
+    global allowed_expire_app
+    global silenced_regexes
+    global sound_alerts
+
+    loaded_config = load_config()
+    try:
+        new_socket_path = resolve_socket_path(loaded_config, ensure_dir=True)
+    except Exception as exc:
+        logging.error("Failed to use configured socket path: %s", exc)
+        new_socket_path = resolve_socket_path({}, ensure_dir=True)
+
+    if current_socket_path and new_socket_path != current_socket_path:
+        logging.warning(
+            "Configured socket path changed from %s to %s, but changing socket path requires a daemon restart",
+            current_socket_path,
+            new_socket_path,
+        )
+
+    single_notification_app = loaded_config.get("single_notification_app", [])
+    names, regexes = _compile_single_notification_filters(single_notification_app)
+
+    config = loaded_config
+    single_notification_app_names = names
+    single_notification_regexes = regexes
+    allowed_expire_app = loaded_config.get("allowed_expire_app", [])
+    silenced_regexes = loaded_config.get("silenced_regexes", [])
+    sound_alerts = loaded_config.get("sound_alerts", {})
+    ntfy_config = loaded_config.get("ntfy", {}) or {}
+    ntfy_mirror_rules = _compile_ntfy_mirror_rules(
+        loaded_config.get("ntfy_mirror", []) or []
+    )
+
+    logging.info("Configuration reloaded")
+    return new_socket_path
 
 
 def mirror_notification_to_ntfy(msg):
@@ -108,6 +202,7 @@ class Rofication(threading.Thread):
         self.notification_queue_lock = threading.Lock()
         self.notification_queue = []
         self.last_id = 0
+        self.muted = False
         self.server = None
         cache_dir = f"{os.environ['HOME']}/.cache/rofication"
         if not os.path.exists(cache_dir):
@@ -298,7 +393,17 @@ class Rofication(threading.Thread):
             mstr = "{lent}\n{ul}".format(
                 lent=len(self.notification_queue), ul=str(len(u))
             )
-            connection.send(bytes(mstr, "utf-8"))
+            mute_flag = "1" if self.muted else "0"
+            connection.send(bytes(f"{mstr}\n{mute_flag}", "utf-8"))
+
+    def communication_command_toggle_mute(self, connection):
+        self.muted = not self.muted
+        state = "enabled" if self.muted else "disabled"
+        logging.info("Do not disturb %s", state)
+        try:
+            connection.send(bytes("1" if self.muted else "0", "utf-8"))
+        except OSError:
+            pass
 
     def run(self):
         server = None
@@ -388,6 +493,8 @@ class Rofication(threading.Thread):
                         self.communication_command_saw(connection, argument)
                     else:
                         logging.warning("Received 'saw' command without argument")
+                elif command == "mute":
+                    self.communication_command_toggle_mute(connection)
 
         if server is not None:
             server.close()
@@ -449,7 +556,7 @@ class NotificationFetcher(dbus.service.Object):
 
         # check if summary has been silenced, regex matching
         silence = False
-        if msg.application in sound_alerts or "sound-file" in hints:
+        if msg.application in sound_alerts or 'default' in sound_alerts or "sound-file" in hints:
             if silenced_regexes:
                 for regex in silenced_regexes:
                     logging.debug(
@@ -457,7 +564,7 @@ class NotificationFetcher(dbus.service.Object):
                             regex=regex, sum=msg.summary
                         )
                     )
-                    if re.search(regex, msg.summary):
+                    if re.search(regex, msg.summary) or re.search(regex, msg.body) or re.search(regex, msg.application):
                         logging.debug("Silencing: {regex}".format(regex=regex))
                         silence = True
                         msg.summary = "🔇 {sum}".format(sum=msg.summary)
@@ -467,9 +574,13 @@ class NotificationFetcher(dbus.service.Object):
             if not silence:
                 if msg.application in sound_alerts:
                     msg.sound = sound_alerts[msg.application]
+                elif 'default' in sound_alerts:
+                    msg.sound = sound_alerts['default']
                 else:
                     msg.sound = str(hints["sound-file"])
-                if os.path.isfile(msg.sound):
+                if self._rofication is not None and self._rofication.muted:
+                    logging.debug("Muted: skipping sound for %s", msg.application)
+                elif os.path.isfile(msg.sound):
                     my_sound = pygame.mixer.Sound(msg.sound)
 
                     # Add cooldown timer for sound notifications
@@ -529,73 +640,20 @@ if __name__ == "__main__":
         level=logging.DEBUG, format="%(asctime)s %(levelname)s %(message)s"
     )
 
-    config = load_config()
-
-    try:
-        socket_path = resolve_socket_path(config, ensure_dir=True)
-    except Exception as exc:
-        logging.error("Failed to use configured socket path: %s", exc)
-        socket_path = resolve_socket_path({}, ensure_dir=True)
+    socket_path = reload_runtime_config()
 
     logging.info("Using socket path %s", socket_path)
 
     rofication = Rofication(socket_path)
 
-    single_notification_app = config.get("single_notification_app", [])
-    # Split single_notification_app into exact app names and regexes
-    single_notification_app_names = [
-        e for e in single_notification_app if isinstance(e, str)
-    ]
-    single_notification_regexes = []
-    for e in single_notification_app:
-        if isinstance(e, dict) and "regex" in e:
-            try:
-                single_notification_regexes.append(re.compile(e["regex"]))
-            except re.error as exc:
-                logging.warning(
-                    "Invalid single_notification_app regex '%s': %s", e["regex"], exc
-                )
-
-    allowed_expire_app = config.get("allowed_expire_app", [])
-    silenced_regexes = config.get("silenced_regexes", [])
-    sound_alerts = config.get("sound_alerts", {})
-    ntfy_config = config.get("ntfy", {}) or {}
-
-    raw_rules = config.get("ntfy_mirror", []) or []
-    compiled_rules = []
-    for rule in raw_rules:
-        pattern_text = rule.get("regex")
-        topic = rule.get("topic")
-        if not pattern_text or not topic:
-            logging.warning(
-                "Skipping ntfy mirror rule without regex or topic: %s", rule
-            )
-            continue
-        try:
-            compiled_pattern = re.compile(pattern_text)
-        except re.error as exc:
-            logging.warning("Invalid ntfy mirror regex '%s': %s", pattern_text, exc)
-            continue
-
-        compiled_rule = {
-            "regex": compiled_pattern,
-            "pattern": pattern_text,
-            "topic": topic,
-        }
-
-        if "priority" in rule:
-            compiled_rule["priority"] = rule["priority"]
-        if "tags" in rule:
-            compiled_rule["tags"] = rule["tags"]
-
-        compiled_rules.append(compiled_rule)
-
-    ntfy_mirror_rules = compiled_rules
-
     main_loop = None
 
     def signal_handler(signum, frame):
         logging.info("Signal handler called with signal: %s", signum)
+        if signum == signal.SIGHUP:
+            reload_runtime_config(current_socket_path=rofication.socket_path)
+            return
+
         event.set()
         if rofication.server is not None:
             try:

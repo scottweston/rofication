@@ -12,8 +12,10 @@ from enum import Enum
 from msg import Msg, Urgency
 
 try:
-    SOCKET_PATH = resolve_socket_path(load_config())
+    CONFIG = load_config()
+    SOCKET_PATH = resolve_socket_path(CONFIG)
 except Exception:
+    CONFIG = {}
     SOCKET_PATH = resolve_socket_path({})
 
 
@@ -39,7 +41,8 @@ def linesplit(socket):
 msg = """<span font-size='small'>	<i>Alt+x</i>: Dismiss notification	<i>Alt+Enter</i>: Mark notification seen
 	<i>Alt+r</i>: Reload			<i>Alt+a</i>:     Delete application notification
 	<i>Alt+1</i>: Del &gt;1h ago		<i>Alt+2</i>:     Del &gt;8h ago
-	<i>Alt+3</i>: Del &gt;24h ago		<i>Alt+z</i>:     Toggle time sort</span>"""
+	<i>Alt+3</i>: Del &gt;24h ago		<i>Alt+z</i>:     Toggle time sort
+	<i>Alt+m</i>: Toggle mute</span>"""
 rofi_command = ["rofi", "-dmenu", "-p", "Notifications:", "-markup", "-mesg", msg]
 
 
@@ -75,6 +78,8 @@ def call_rofi(entries, additional_args=[]):
             "Alt+3,Ctrl+3",
             "-kb-custom-10",
             "Alt+z,Alt+Z",
+            "-kb-custom-11",
+            "Alt+m,Alt+M",
             "-markup-rows",
             "-sep",
             "\3",
@@ -112,12 +117,57 @@ def call_rofi(entries, additional_args=[]):
         return None, 0
 
 
-def send_command(cmd):
+def send_command(cmd, expect_response=False):
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     client.connect(SOCKET_PATH)
     print("Send: {cmd}".format(cmd=cmd))
     client.send(bytes(cmd, "utf-8"))
+    response = None
+    if expect_response:
+        chunks = []
+        while True:
+            data = client.recv(64)
+            if not data:
+                break
+            chunks.append(data.decode("utf-8"))
+        response = "".join(chunks).strip()
     client.close()
+    return response
+
+
+def set_dnd_state(enabled):
+    """Best-effort DBus hooks for popular notification centers."""
+    state_arg = "boolean:true" if enabled else "boolean:false"
+    commands = [
+        [
+            "dbus-send",
+            "--session",
+            "--dest=org.erikreider.swaync",
+            "/org/erikreider/swaync/cc",
+            "org.erikreider.swaync.cc.SetDndState",
+            state_arg,
+        ],
+        [
+            "dbus-send",
+            "--session",
+            "--dest=org.dunstproject.cmd0",
+            "/org/dunstproject/Command0",
+            "org.dunstproject.cmd0.SetPaused",
+            state_arg,
+        ],
+    ]
+    for command in commands:
+        try:
+            subprocess.run(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=True,
+            )
+            return True
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            continue
+    return False
 
 
 did = None
@@ -221,4 +271,9 @@ while cont:
         cont = True
     elif code == 19:
         sort_descending = not sort_descending
+        cont = True
+    elif code == 20:
+        mute_state = send_command("mute", expect_response=True)
+        if mute_state in ("0", "1"):
+            set_dnd_state(mute_state == "1")
         cont = True

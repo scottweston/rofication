@@ -34,6 +34,66 @@ silenced_regexes = []
 sound_alerts = {}
 
 
+def _resolve_log_level(configured_level):
+    default_level = logging.DEBUG
+    if configured_level is None:
+        return default_level, None
+
+    if isinstance(configured_level, int):
+        if configured_level >= 0:
+            return configured_level, None
+        return default_level, f"Invalid negative log level '{configured_level}'"
+
+    if isinstance(configured_level, str):
+        level_name = configured_level.strip().upper()
+        if level_name in logging._nameToLevel:
+            resolved_level = logging._nameToLevel[level_name]
+            if isinstance(resolved_level, int) and resolved_level >= 0:
+                return resolved_level, None
+        return default_level, f"Invalid log level '{configured_level}'"
+
+    return default_level, f"Unsupported log level type '{type(configured_level).__name__}'"
+
+
+def configure_logging(config):
+    log_level, level_warning = _resolve_log_level(config.get("log_level"))
+    log_file = config.get("log_file")
+    handlers = [logging.StreamHandler()]
+    log_file_path = None
+    log_file_warning = None
+
+    if isinstance(log_file, str) and log_file.strip():
+        log_file_path = os.path.abspath(os.path.expanduser(log_file.strip()))
+        log_dir = os.path.dirname(log_file_path)
+        try:
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
+            handlers.append(logging.FileHandler(log_file_path))
+        except Exception as exc:
+            log_file_warning = (
+                f"Failed to open log file '{log_file_path}', using stderr only: {exc}"
+            )
+            log_file_path = None
+    elif log_file not in (None, ""):
+        log_file_warning = (
+            f"Ignoring non-string log_file value of type '{type(log_file).__name__}'"
+        )
+
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=handlers,
+        force=True,
+    )
+
+    if level_warning:
+        logging.warning("%s; defaulting to DEBUG", level_warning)
+    if log_file_warning:
+        logging.warning(log_file_warning)
+    if log_file_path:
+        logging.info("Logging to file %s", log_file_path)
+
+
 def _compile_single_notification_filters(entries):
     names = [entry for entry in entries if isinstance(entry, str)]
     regexes = []
@@ -92,6 +152,8 @@ def reload_runtime_config(current_socket_path=None):
     global sound_alerts
 
     loaded_config = load_config()
+    configure_logging(loaded_config)
+
     try:
         new_socket_path = resolve_socket_path(loaded_config, ensure_dir=True)
     except Exception as exc:
@@ -571,18 +633,22 @@ class NotificationFetcher(dbus.service.Object):
                         break
                     else:
                         logging.debug("Not silencing: {regex}".format(regex=regex))
+
             if not silence:
                 if msg.application in sound_alerts:
                     msg.sound = sound_alerts[msg.application]
+                elif 'sound-file' in hints and os.path.isfile(str(hints["sound-file"])):
+                    msg.sound = str(hints["sound-file"])
                 elif 'default' in sound_alerts:
                     msg.sound = sound_alerts['default']
                 else:
-                    msg.sound = str(hints["sound-file"])
+                    msg.sound = None
+
+                logging.debug("Determined sound for notification: %s", msg.sound)
+
                 if self._rofication is not None and self._rofication.muted:
                     logging.debug("Muted: skipping sound for %s", msg.application)
                 elif os.path.isfile(msg.sound):
-                    my_sound = pygame.mixer.Sound(msg.sound)
-
                     # Add cooldown timer for sound notifications
                     current_time = time.time()
                     last_sound_time = self._last_sound_time
@@ -591,12 +657,17 @@ class NotificationFetcher(dbus.service.Object):
                     )  # Default cooldown: 10 seconds
 
                     if current_time - last_sound_time >= sound_cooldown:
+                        my_sound = pygame.mixer.Sound(msg.sound)
                         my_sound.play()
                         self._last_sound_time = current_time
                     else:
                         logging.debug(
-                            f"Sound notification throttled (cooldown: {sound_cooldown}s)"
+                                f"Sound notification throttled (cooldown: {sound_cooldown}s remaining: {sound_cooldown - (current_time - last_sound_time):.1f}s) for {msg.application}"
                         )
+                else:
+                    logging.debug(
+                        f"Sound file '{msg.sound}' does not exist; skipping sound for {msg.application}"
+                    )
         else:
             logging.debug(
                 f"No sound file found in hints or configured for {msg.application}."
@@ -636,9 +707,7 @@ class NotificationFetcher(dbus.service.Object):
     Main function
 """
 if __name__ == "__main__":
-    logging.basicConfig(
-        level=logging.DEBUG, format="%(asctime)s %(levelname)s %(message)s"
-    )
+    configure_logging({})
 
     socket_path = reload_runtime_config()
 

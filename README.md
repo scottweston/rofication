@@ -162,6 +162,20 @@ application name.
 The rules are evaluated in order and only the first match triggers a mirror to
 ntfy. The `tags` field accepts either a string or an array of emoji short codes.
 
+You can also configure daemon logging:
+
+```json
+{
+  "log_level": "INFO",
+  "log_file": "~/.cache/rofication/daemon.log"
+}
+```
+
+`log_level` accepts standard Python logging levels (for example `DEBUG`, `INFO`,
+`WARNING`, `ERROR`, `CRITICAL`) and defaults to `DEBUG`. `log_file` is optional;
+when set, logs are written to both stderr and the configured file. Reloading the
+daemon configuration with `SIGHUP` also reapplies logging settings.
+
 By default the daemon listens on a Unix domain socket located at
 `$XDG_RUNTIME_DIR/rofication/daemon.sock`, falling back to
 `~/.cache/rofication/daemon.sock` when the runtime directory is not available.

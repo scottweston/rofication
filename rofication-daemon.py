@@ -737,6 +737,11 @@ if __name__ == "__main__":
     signal.signal(signal.SIGHUP, signal_handler)
     signal.signal(signal.SIGQUIT, signal_handler)
 
+    # Set application name for PipeWire/PulseAudio and SDL
+    os.environ["PULSE_PROP"] = "application.name='Rofication' media.role=notification"
+    os.environ["SDL_AUDIO_DEVICE_APP_NAME"] = "Rofication"
+    os.environ["SDL_APP_NAME"] = "Rofication"
+
     pygame.init()
 
     dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)

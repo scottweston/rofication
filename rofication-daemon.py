@@ -686,14 +686,14 @@ class NotificationFetcher(dbus.service.Object):
 
     @dbus.service.signal("org.freedesktop.Notifications", signature="uu")
     def NotificationClosed(self, id_in, reason_in):
-        _rofication.remove_notification(id_in)
+        self._rofication.remove_notification(id_in)
         pass
 
     @dbus.service.method(
         "org.freedesktop.Notifications", in_signature="u", out_signature=""
     )
     def CloseNotification(self, id):
-        _rofication.remove_notification(id)
+        self._rofication.remove_notification(id)
         pass
 
     @dbus.service.method(

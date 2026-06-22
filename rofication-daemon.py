@@ -389,11 +389,16 @@ class Rofication(threading.Thread):
 
     def communication_command_send_list(self, connection):
         with self.notification_queue_lock:
-            i = 0
             for noti in self.notification_queue:
                 connection.send(bytes(jsonpickle.encode(noti), "utf-8"))
                 connection.send(b"\n")
-                i += 1
+
+    def communication_command_send_unread(self, connection):
+        with self.notification_queue_lock:
+            for noti in self.notification_queue:
+                if not getattr(noti, "read", False):
+                    connection.send(bytes(jsonpickle.encode(noti), "utf-8"))
+                    connection.send(b"\n")
 
     def communication_command_delete(self, connection, arg):
         with self.notification_queue_lock:
@@ -431,6 +436,7 @@ class Rofication(threading.Thread):
         with self.notification_queue_lock:
             for noti in self.notification_queue:
                 if noti.mid == int(arg):
+                    noti.read = True
                     noti.urgency = int(Urgency.normal)
                     break
 
@@ -526,6 +532,8 @@ class Rofication(threading.Thread):
                     self.communication_command_num(connection)
                 elif command == "list":
                     self.communication_command_send_list(connection)
+                elif command == "unread":
+                    self.communication_command_send_unread(connection)
                 elif command == "del":
                     if argument:
                         self.communication_command_delete(connection, argument)

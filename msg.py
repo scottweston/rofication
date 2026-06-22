@@ -16,5 +16,5 @@ class Msg():
         self.application="n/a"
         self.app_icon=""
         self.urgency=int(Urgency.normal)
+        self.read=False
         pass
-

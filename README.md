@@ -66,7 +66,13 @@ to view notifications, mark them as seen and dismiss them.
 
 ## CLI
 
-*This still needs to be written*
+Print the daemon's currently unread notifications as a JSON array:
+
+```
+./rofication-cli.py unread
+```
+
+The daemon must be running. Notifications marked as seen in the GUI are omitted.
 
 ## Example usage with Hyprland and Waybar
 

@@ -1,0 +1,15 @@
+# Install with:
+#   uv venv
+#   uv pip install -r requirements.txt
+#
+# PyGObject and dbus-python require the corresponding system development
+# libraries to be installed by the OS package manager.
+dbus-python
+jsonpickle
+pygame
+PyGObject
+python-dateutil
+requests
+
+# Test runner for the existing tests/ suite.
+pytest
